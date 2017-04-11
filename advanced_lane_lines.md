@@ -255,25 +255,6 @@ First, I am defining a few helper function to tie my image process pipepline tog
 
 
 ```python
-def region_mask(img):
-    shape = img.shape
-    vertices = np.array([[(0,0),(shape[1],0),(shape[1],0),(6*shape[1]/7,shape[0]),
-                      (shape[1]/7,shape[0]), (0,0)]],dtype=np.int32)
-
-    mask = np.zeros_like(img)   
-    
-    if len(img.shape) > 2:
-        channel_count = img.shape[2]  # i.e. 3 or 4 depending on your image
-        ignore_mask_color = (255,) * channel_count
-    else:
-        ignore_mask_color = 255
-        
-    cv2.fillPoly(mask, vertices, ignore_mask_color)
-    
-    #returning the image only where mask pixels are nonzero
-    masked_image = cv2.bitwise_and(img, mask)
-    return masked_image
-
 def undistort(img):
     result = cv2.undistort(img, mtx, dist, None, mtx)
     return result
@@ -287,7 +268,6 @@ def undist_pipeline_warp(img):
     color_binary, binary = pipeline(img,s_thresh=(110, 255),sx_thresh=(25, 255))
     combined_binary = 255*np.dstack((binary,binary,binary)).astype('uint8')
     result = warp(combined_binary)
-    # result = region_mask(result)
     return result, combined_binary
 
 img = plt.imread('test_images/test1.jpg')
@@ -320,7 +300,7 @@ plt.plot(histogram)
 
 
 
-    [<matplotlib.lines.Line2D at 0x10cab5978>]
+    [<matplotlib.lines.Line2D at 0x111312ef0>]
 
 
 
@@ -538,7 +518,7 @@ leftx_sample = np.array([200 + (y**2)*quadratic_coeff + np.random.randint(-50, h
 rightx_sample = np.array([900 + (y**2)*quadratic_coeff + np.random.randint(-50, high=51) 
                                 for y in ploty_sample])
 
-def calculate_curvature(leftx, rightx, ploty):
+def calculate_curvature(leftx, rightx, ploty, do_plot=False):
     #leftx = leftx[::-1]  # Reverse to match top-to-bottom in y
     #rightx = rightx[::-1]  # Reverse to match top-to-bottom in y
 
@@ -549,14 +529,15 @@ def calculate_curvature(leftx, rightx, ploty):
     right_fitx = right_fit[0]*ploty**2 + right_fit[1]*ploty + right_fit[2]
 
     # Plot up the fake data
-    mark_size = 3
-    plt.plot(leftx, ploty, 'o', color='red', markersize=mark_size)
-    plt.plot(rightx, ploty, 'o', color='blue', markersize=mark_size)
-    plt.xlim(0, 1280)
-    plt.ylim(0, 720)
-    plt.plot(left_fitx, ploty, color='green', linewidth=3)
-    plt.plot(right_fitx, ploty, color='green', linewidth=3)
-    plt.gca().invert_yaxis() # to visualize as we do the images
+    if do_plot is True:
+        mark_size = 3
+        plt.plot(leftx, ploty, 'o', color='red', markersize=mark_size)
+        plt.plot(rightx, ploty, 'o', color='blue', markersize=mark_size)
+        plt.xlim(0, 1280)
+        plt.ylim(0, 720)
+        plt.plot(left_fitx, ploty, color='green', linewidth=3)
+        plt.plot(right_fitx, ploty, color='green', linewidth=3)
+        plt.gca().invert_yaxis() # to visualize as we do the images
 
     # Define y-value where we want radius of curvature
     # I'll choose the maximum y-value, corresponding to the bottom of the image
@@ -572,18 +553,20 @@ def calculate_curvature(leftx, rightx, ploty):
     # Fit new polynomials to x,y in world space
     left_fit_cr = np.polyfit(ploty*ym_per_pix, leftx*xm_per_pix, 2)
     right_fit_cr = np.polyfit(ploty*ym_per_pix, rightx*xm_per_pix, 2)
+    
     # Calculate the new radii of curvature
     left_curverad = ((1 + (2*left_fit_cr[0]*y_eval*ym_per_pix + left_fit_cr[1])**2)**1.5) / np.absolute(2*left_fit_cr[0])
     right_curverad = ((1 + (2*right_fit_cr[0]*y_eval*ym_per_pix + right_fit_cr[1])**2)**1.5) / np.absolute(2*right_fit_cr[0])
     # Now our radius of curvature is in meters
-    print('Curvature in world space: ', left_curverad, 'm', right_curverad, 'm')
+    curvature = 0.5*(round(right_curverad/1000,1) + round(left_curverad/1000,1))
+    position = 3.7
+    return position, curvature
 
 #calculate_curvature(leftx_sample, rightx_sample, ploty_sample)
-calculate_curvature(left_fitx, right_fitx, ploty)
+position, curvature = calculate_curvature(left_fitx, right_fitx, ploty, do_plot=True)
 ```
 
     Curvature in pixel space:  3667.80935596 8727.28333836
-    Curvature in world space:  1203.24180809 m 2755.11097694 m
 
 
 
@@ -596,7 +579,7 @@ First, we create an empty image to draw the lines on. Then we recast the x and y
 
 
 ```python
-def overlay_lane_lines(img,left_fitx,right_fitx,yvals):
+def overlay_lane_lines(img,left_fitx,right_fitx,yvals,curv_overlay=False):
     lanefit_image = np.zeros_like(img).astype(np.uint8)
 
     left = np.array([np.transpose(np.vstack([left_fitx, yvals]))])
@@ -607,23 +590,32 @@ def overlay_lane_lines(img,left_fitx,right_fitx,yvals):
     undist = undistort(img)
     inverse_warp = cv2.warpPerspective(lanefit_image, MInv, (img.shape[1], img.shape[0])) 
     result = cv2.addWeighted(undist, 1, inverse_warp, 0.3, 0)
+    if curv_overlay is True:
+        position, curvature = calculate_curvature(left_fitx, right_fitx, yvals, do_plot=False)
+        curv_str = str('Radius of curvature: '+str(curvature)+'km')
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        cv2.putText(result, curv_str,(430,670), font, 1,(0,0,255),2,cv2.LINE_AA)
+
     return result
 
 img = plt.imread('test_images/test1.jpg')
-overlay = overlay_lane_lines(img, left_fitx, right_fitx, ploty)
+overlay = overlay_lane_lines(img, left_fitx, right_fitx, ploty, curv_overlay=True)
 
 draw_two_imgs(img, overlay, title2='Overlay')
 ```
 
+    Curvature in pixel space:  3667.80935596 8727.28333836
 
-![png](output_24_0.png)
+
+
+![png](output_24_1.png)
 
 
 ### 5. Pipeline (video)
 
 #### 5.1 Process image frame
 
-I created a function called `process_image`, that will take an image as parameter and run through the pipeline we have developed so far. I used image test4.jpg to test my pipeline. 
+I created a function called `process_image`, that will take an image as parameter and run through the pipeline we have developed so far. I used image test4.jpg to test my pipeline. It looks pretty good!
 
 
 ```python
@@ -664,7 +656,7 @@ def process_image(img):
 
 
 ```python
-img = plt.imread('test_images/test4.jpg')
+img = plt.imread('test_images/test3.jpg')
 overlay = process_image(img)
 
 draw_two_imgs(img, overlay, title2='Overlay')
@@ -686,20 +678,6 @@ clip1 = VideoFileClip("project_video.mp4")
 processed_clip = clip1.fl_image(process_image) #NOTE: this function expects color images!!
 %time processed_clip.write_videofile(video_output, audio=False)
 ```
-
-    [MoviePy] >>>> Building video project_video_out.mp4
-    [MoviePy] Writing video project_video_out.mp4
-
-
-    100%|█████████▉| 1260/1261 [05:37<00:00,  3.80it/s]
-
-
-    [MoviePy] Done.
-    [MoviePy] >>>> Video ready: project_video_out.mp4 
-    
-    CPU times: user 5min 51s, sys: 1min 3s, total: 6min 55s
-    Wall time: 5min 37s
-
 
 
 ```python
