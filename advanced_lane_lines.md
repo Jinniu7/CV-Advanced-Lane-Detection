@@ -615,7 +615,7 @@ draw_two_imgs(img, overlay, title2='Overlay')
 
 #### 5.1 Process image frame
 
-I created a function called `process_image`, that will take an image as parameter and run through the pipeline we have developed so far. I used image test4.jpg to test my pipeline. It looks pretty good!
+I created a function called `process_image`, that will take an image as parameter and run through the pipeline we have developed so far. I used image [test3.jpg](test_images/test3.jpg) to test my pipeline. It looks pretty good!
 
 
 ```python
@@ -668,7 +668,7 @@ draw_two_imgs(img, overlay, title2='Overlay')
 
 #### 5.2 Saving video
 
-Here we use moviepy's VideoFileClip to grab each frame and feed it through my developed pipeline. The output video file is save in `project_video_out.mp4`.
+Here we use moviepy's VideoFileClip to grab each frame and feed it through my developed pipeline. The output video file is save in [project_video_out.mp4](project_video_out.mp4).
 
 
 ```python
