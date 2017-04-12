@@ -519,7 +519,7 @@ plt.ylim(720, 0)
 
 
 
-![png](output_20_2.png)
+![png](output_20_1.png)
 
 
 #### 4.4 Measuring Curvature
@@ -588,7 +588,7 @@ position, curvature = calculate_curvature(center_offset,left_fitx, right_fitx, p
 ```
 
 
-![png](output_22_0.png)
+![png](output_22_1.png)
 
 
 #### 4.5 Lane Area Overlay
