@@ -215,7 +215,8 @@ src = np.float32([corners[0],corners[1],corners[2],corners[3]])
 dst = np.float32([corners[0]+offset,top_left+offset,top_right-offset,corners[3]-offset])
 print(dst)
 # Test it out
-img = mpimg.imread('test_images/straight_lines1.jpg')
+img = np.copy(image)
+#mpimg.imread('test_images/straight_lines1.jpg')
 img_size = (img.shape[1], img.shape[0])
 undist = cv2.undistort(img, mtx, dist, None, mtx)
 warped, M, MInv = warper(undist, src, dst, debug=True)
@@ -270,7 +271,7 @@ def undist_pipeline_warp(img):
     result = warp(combined_binary)
     return result, combined_binary
 
-img = plt.imread('test_images/test1.jpg')
+img = plt.imread('test_images/test3.jpg')
 warped_binary, intermediate_binary = undist_pipeline_warp(img)
 
 draw_two_imgs(img, warped_binary, title2='Warped Binary')
@@ -294,13 +295,13 @@ plt.plot(histogram)
 ```
 
     (1280,)
-    338
+    345
 
 
 
 
 
-    [<matplotlib.lines.Line2D at 0x111312ef0>]
+    [<matplotlib.lines.Line2D at 0x10bcec208>]
 
 
 
@@ -324,7 +325,8 @@ def sliding_window(binary_warped):
     
     leftx_base = np.argmax(histogram[:midpoint])
     rightx_base = np.argmax(histogram[midpoint:]) + midpoint
-    ## print('midpoint, left, right:', midpoint, leftx_base, rightx_base)
+    center_offset = int((leftx_base+rightx_base)/2) - midpoint
+    #print('Inital left, midpoint, right, center_offset: ', midpoint, leftx_base, rightx_base, center_offset)
 
     # Choose the number of sliding windows
     nwindows = 9
@@ -391,9 +393,9 @@ def sliding_window(binary_warped):
     # Fit a second order polynomial to each
     left_fit = np.polyfit(lefty, leftx, 2)
     right_fit = np.polyfit(righty, rightx, 2)
-    return lanes_detected, left_fit, right_fit
+    return lanes_detected, center_offset, left_fit, right_fit
     
-lanes_detected, left_fit, right_fit = sliding_window(warped_binary)
+lanes_detected, center_offset, left_fit, right_fit = sliding_window(warped_binary)
 # Generate x and y values for plotting
 ploty = np.linspace(0, warped_binary.shape[0]-1, warped_binary.shape[0] )
 left_fitx = left_fit[0]*ploty**2 + left_fit[1]*ploty + left_fit[2]
@@ -428,6 +430,18 @@ Once we detected the lane lines on the first image frame, we don't have to use t
 
 ```python
 def subsequent_frame(binary_warped, left_fit, right_fit):
+    if len(binary_warped.shape) > 2:
+        single_channel = binary_warped[:,:,0]
+    else:
+        single_channel = binary_warped
+
+    histogram = np.sum(single_channel[int(single_channel.shape[0]/2):,:], axis=0)
+    midpoint = np.int(histogram.shape[0]/2)    
+    leftx_base = np.argmax(histogram[:midpoint])
+    rightx_base = np.argmax(histogram[midpoint:]) + midpoint
+    center_offset = int((leftx_base+rightx_base)/2) - midpoint
+    #print('Subsequent left, midpoint, right, center_offset: ', midpoint, leftx_base, rightx_base, center_offset)
+
     nonzero = binary_warped.nonzero()
     nonzeroy = np.array(nonzero[0])
     nonzerox = np.array(nonzero[1])
@@ -453,13 +467,15 @@ def subsequent_frame(binary_warped, left_fit, right_fit):
     ploty = np.linspace(0, binary_warped.shape[0]-1, binary_warped.shape[0] )
     left_fitx = left_fit[0]*ploty**2 + left_fit[1]*ploty + left_fit[2]
     right_fitx = right_fit[0]*ploty**2 + right_fit[1]*ploty + right_fit[2]
-    return lanes_detected, left_fit, right_fit 
+    return lanes_detected, center_offset, left_fit, right_fit 
 
-img = plt.imread('test_images/test1.jpg')
+img = plt.imread('test_images/test3.jpg')
 binary, _= undist_pipeline_warp(img)
 binary_warped = binary[:,:,0]
+print('undist_pipeline_warp returns 3-channels: ', binary.shape)
+print('binary_warped.shape', binary_warped.shape)
 
-detected, left_fit, right_fit = subsequent_frame(binary_warped, left_fit, right_fit)
+detected,center_offset,left_fit,right_fit = subsequent_frame(binary_warped, left_fit, right_fit)
 
 # Create an image to draw on and an image to show the selection window
 out_img = np.dstack((binary_warped, binary_warped, binary_warped))*255
@@ -491,6 +507,10 @@ plt.ylim(720, 0)
     
 ```
 
+    undist_pipeline_warp returns 3-channels:  (720, 1280, 3)
+    binary_warped.shape (720, 1280)
+
+
 
 
 
@@ -499,7 +519,7 @@ plt.ylim(720, 0)
 
 
 
-![png](output_20_1.png)
+![png](output_20_2.png)
 
 
 #### 4.4 Measuring Curvature
@@ -518,7 +538,7 @@ leftx_sample = np.array([200 + (y**2)*quadratic_coeff + np.random.randint(-50, h
 rightx_sample = np.array([900 + (y**2)*quadratic_coeff + np.random.randint(-50, high=51) 
                                 for y in ploty_sample])
 
-def calculate_curvature(leftx, rightx, ploty, do_plot=False):
+def calculate_curvature(midoffset, leftx, rightx, ploty, do_plot=False):
     #leftx = leftx[::-1]  # Reverse to match top-to-bottom in y
     #rightx = rightx[::-1]  # Reverse to match top-to-bottom in y
 
@@ -544,7 +564,7 @@ def calculate_curvature(leftx, rightx, ploty, do_plot=False):
     y_eval = np.max(ploty)
     left_curverad = ((1 + (2*left_fit[0]*y_eval + left_fit[1])**2)**1.5) / np.absolute(2*left_fit[0])
     right_curverad = ((1 + (2*right_fit[0]*y_eval + right_fit[1])**2)**1.5) / np.absolute(2*right_fit[0])
-    print('Curvature in pixel space: ', left_curverad, right_curverad)
+    #print('Curvature in pixel space: ', left_curverad, right_curverad)
 
     # Define conversions in x and y from pixels space to meters
     ym_per_pix = 30/720 # meters per pixel in y dimension
@@ -559,18 +579,16 @@ def calculate_curvature(leftx, rightx, ploty, do_plot=False):
     right_curverad = ((1 + (2*right_fit_cr[0]*y_eval*ym_per_pix + right_fit_cr[1])**2)**1.5) / np.absolute(2*right_fit_cr[0])
     # Now our radius of curvature is in meters
     curvature = 0.5*(round(right_curverad/1000,1) + round(left_curverad/1000,1))
-    position = 3.7
+    # vehicle/camera center position in CM
+    position = round(100*midoffset*xm_per_pix, 1) 
     return position, curvature
 
 #calculate_curvature(leftx_sample, rightx_sample, ploty_sample)
-position, curvature = calculate_curvature(left_fitx, right_fitx, ploty, do_plot=True)
+position, curvature = calculate_curvature(center_offset,left_fitx, right_fitx, ploty, do_plot=True)
 ```
 
-    Curvature in pixel space:  3667.80935596 8727.28333836
 
-
-
-![png](output_22_1.png)
+![png](output_22_0.png)
 
 
 #### 4.5 Lane Area Overlay
@@ -579,7 +597,7 @@ First, we create an empty image to draw the lines on. Then we recast the x and y
 
 
 ```python
-def overlay_lane_lines(img,left_fitx,right_fitx,yvals,curv_overlay=False):
+def overlay_lane_lines(img,midoffset,left_fitx,right_fitx,yvals,curv_overlay=False):
     lanefit_image = np.zeros_like(img).astype(np.uint8)
 
     left = np.array([np.transpose(np.vstack([left_fitx, yvals]))])
@@ -591,31 +609,30 @@ def overlay_lane_lines(img,left_fitx,right_fitx,yvals,curv_overlay=False):
     inverse_warp = cv2.warpPerspective(lanefit_image, MInv, (img.shape[1], img.shape[0])) 
     result = cv2.addWeighted(undist, 1, inverse_warp, 0.3, 0)
     if curv_overlay is True:
-        position, curvature = calculate_curvature(left_fitx, right_fitx, yvals, do_plot=False)
-        curv_str = str('Radius of curvature: '+str(curvature)+'km')
+        position, curvature = calculate_curvature(midoffset, left_fitx, right_fitx, yvals, do_plot=False)
+        pos_str = str('Vehicle Center Offset: '+str(position)+"cm")
+        curv_str = str('Radius of Curvature: '+str(curvature)+'km')
         font = cv2.FONT_HERSHEY_SIMPLEX
         cv2.putText(result, curv_str,(430,670), font, 1,(0,0,255),2,cv2.LINE_AA)
+        cv2.putText(result, pos_str,(420,620), font, 1,(0,0,255),2,cv2.LINE_AA)
 
     return result
 
 img = plt.imread('test_images/test1.jpg')
-overlay = overlay_lane_lines(img, left_fitx, right_fitx, ploty, curv_overlay=True)
+overlay = overlay_lane_lines(img, center_offset, left_fitx, right_fitx, ploty, curv_overlay=True)
 
 draw_two_imgs(img, overlay, title2='Overlay')
 ```
 
-    Curvature in pixel space:  3667.80935596 8727.28333836
 
-
-
-![png](output_24_1.png)
+![png](output_24_0.png)
 
 
 ### 5. Pipeline (video)
 
 #### 5.1 Process image frame
 
-I created a function called `process_image`, that will take an image as parameter and run through the pipeline we have developed so far. I used image [test3.jpg](test_images/test3.jpg) to test my pipeline. It looks pretty good!
+I created a function called `process_image`, that will take an image as parameter and run through the pipeline we have developed so far. I used image test4.jpg to test my pipeline. It looks pretty good!
 
 
 ```python
@@ -637,16 +654,16 @@ def process_image(img):
     warped_binary, intermediate_binary = undist_pipeline_warp(img)
     if lanes_detected is None:
         ## print('Lanes not detected yet, try sliding window')
-        lanes_detected, left_fit, right_fit = sliding_window(warped_binary)
+        lanes_detected,mid_offset,left_fit,right_fit = sliding_window(warped_binary)
 
     if lanes_detected is True:
-        lanes_detected, left_fit, right_fit = subsequent_frame(warped_binary, left_fit, right_fit)
+        lanes_detected,mid_offset,left_fit,right_fit = subsequent_frame(warped_binary, left_fit, right_fit)
 
         # Generate x and y values for plotting
         ploty = np.linspace(0, warped_binary.shape[0]-1, warped_binary.shape[0] )
         left_fitx = left_fit[0]*ploty**2 + left_fit[1]*ploty + left_fit[2]
         right_fitx = right_fit[0]*ploty**2 + right_fit[1]*ploty + right_fit[2]
-        image = overlay_lane_lines(img, left_fitx, right_fitx, ploty)
+        image = overlay_lane_lines(img,mid_offset,left_fitx,right_fitx,ploty,curv_overlay=True)
     else:
         ## print('Not detect, try next frame')
         lanes_detected = None
@@ -668,7 +685,7 @@ draw_two_imgs(img, overlay, title2='Overlay')
 
 #### 5.2 Saving video
 
-Here we use moviepy's VideoFileClip to grab each frame and feed it through my developed pipeline. The output video file is save in [project_video_out.mp4](project_video_out.mp4).
+Here we use moviepy's VideoFileClip to grab each frame and feed it through my developed pipeline. The output video file is save in `project_video_out.mp4`.
 
 
 ```python
@@ -678,6 +695,79 @@ clip1 = VideoFileClip("project_video.mp4")
 processed_clip = clip1.fl_image(process_image) #NOTE: this function expects color images!!
 %time processed_clip.write_videofile(video_output, audio=False)
 ```
+
+    [MoviePy] >>>> Building video project_video_out.mp4
+    [MoviePy] Writing video project_video_out.mp4
+
+
+    100%|█████████▉| 1260/1261 [06:08<00:00,  3.41it/s]
+
+
+    [MoviePy] Done.
+    [MoviePy] >>>> Video ready: project_video_out.mp4 
+    
+    CPU times: user 6min 13s, sys: 1min 14s, total: 7min 28s
+    Wall time: 6min 9s
+
+
+#### 6 Discussions
+
+This project is a challenging one for anyone who does not have a solid background in computer vision or OpenCV. What was covered in video classes fortunately were all that are required to complete the project. But it did take me a while to piece everything together. 
+
+Two major difficulties arose during the project. The first is to identify the image points and object points in order to calculate the perspective matrix. It took some time to wrap my mind around what is going on. 
+
+The second difficulty is to come up with the right combination of threshold filters (gradient threshold, color threshold, S v.s. L channel thresholds). There are just a lot of parameters to deal with. I feel like this is the area where a lot of improvements can be made in the future. The current pipeline does not well on the challenge video and I suspect that a lot fine-tuning in this area should help. 
+
+### 7 Challenge
+
+
+
+
+```python
+video_output = 'challenge_video_out.mp4'
+clip1 = VideoFileClip("challenge_video.mp4")
+#clip1 = VideoFileClip("solidWhiteRight.mp4")
+processed_clip = clip1.fl_image(process_image) #NOTE: this function expects color images!!
+%time processed_clip.write_videofile(video_output, audio=False)
+```
+
+    [MoviePy] >>>> Building video challenge_video_out.mp4
+    [MoviePy] Writing video challenge_video_out.mp4
+
+
+    100%|██████████| 485/485 [02:14<00:00,  3.56it/s]
+
+
+    [MoviePy] Done.
+    [MoviePy] >>>> Video ready: challenge_video_out.mp4 
+    
+    CPU times: user 2min 17s, sys: 27.9 s, total: 2min 44s
+    Wall time: 2min 15s
+
+
+
+```python
+video_output = 'harder_challenge_video_out.mp4'
+clip1 = VideoFileClip("harder_challenge_video.mp4")
+#clip1 = VideoFileClip("solidWhiteRight.mp4")
+processed_clip = clip1.fl_image(process_image) #NOTE: this function expects color images!!
+%time processed_clip.write_videofile(video_output, audio=False)
+
+```
+
+    [MoviePy] >>>> Building video harder_challenge_video_out.mp4
+    [MoviePy] Writing video harder_challenge_video_out.mp4
+
+
+    100%|█████████▉| 1199/1200 [06:56<00:00,  3.31it/s]
+
+
+    [MoviePy] Done.
+    [MoviePy] >>>> Video ready: harder_challenge_video_out.mp4 
+    
+    CPU times: user 6min 38s, sys: 1min 35s, total: 8min 13s
+    Wall time: 6min 57s
+
 
 
 ```python
